@@ -1,0 +1,579 @@
+---
+title: "Ways to find patients with abnormal malignant transcript expression"
+author: "Claus Scholz"
+date: "6 November 2018"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## Introduction
+
+For the analysis of the malignant/total expression dataset, I present three approaches to identify patients with expression changes between time points. All of them are valid, but if I had to choose one, then I take the last as most appropriate.
+
+
+## Setup
+
+First, I'll load some R packages required for the analysis.
+
+```{r message = FALSE}
+library(ggplot2)
+library(knitr)
+```
+
+
+## Data Import and Cleaning
+
+To start with the analysis, I'll load the dataset directly from my forked repository on Github.
+
+```{r}
+input_file_path <- "https://raw.githubusercontent.com/clajusch/exercise/master/raw_data.tsv"
+raw_data <- as.matrix(read.table(input_file_path, 
+                                 header = TRUE, 
+                                 sep = "\t"))
+```
+
+A quick look at the dataset reveals several issues.
+
+```{r}
+dim(raw_data)
+summary(raw_data)
+```
+
+A quite large proportion of the dataset is made up of missing values (`NA`); it furthermore contains negative and infinitive values which don't make sense in our experimental setting. Thus, negative and infinitive values are set to `NA`.
+
+```{r}
+count_data <- raw_data
+count_data[count_data<0 | count_data==Inf] <- NA
+```
+
+
+
+## The Bioinformatics solution
+
+The Bioinformatics strategy is to first impute missing values with the `imp4p` package and to then perform expression analyses on malignant and normal gene expression using the Bioconductor package `DSS`, which is suited to analyze data that follows a beta binomial distribution. Then, both results will be compared to ensure independence of malignant and normal expression changes. 
+
+```{r message = FALSE}
+library(DSS)
+library(edgeR)
+library(imp4p)
+```
+
+
+### Prediction of Missing Values
+
+Here, I'll use the `imp4p` package to predict missing values in the dataset.
+
+```{r echo = FALSE, message = FALSE, warning = FALSE}
+set.seed(42) # ;-)
+experimental_groups <- factor(rep(1:2, each=8))
+fake_biol_reps <- factor(rep(1:4, each=4))
+count_imp4p <- impute.mi(count_data, 
+                         conditions = experimental_groups, 
+                         repbio = fake_biol_reps)
+colnames(count_imp4p$tab.imp) <- colnames(count_data)
+rownames(count_imp4p$tab.imp) <- paste("patient", 1:nrow(count_imp4p$tab.imp), sep ="_")
+```
+
+Let's have a look at the imputation result:
+
+```{r}
+summary(count_imp4p$tab.imp)
+```
+
+In the following I do a little data cleaning and calculate normal transcript expression.
+
+```{r}
+malignant_imp4p_counts <- count_imp4p$tab.imp[, 1:8]
+malignant_imp4p_counts[malignant_imp4p_counts<0] <- 0
+total_imp4p_counts <- count_imp4p$tab.imp[, 9:16]
+
+t_al_m <- total_imp4p_counts>=malignant_imp4p_counts # t at least m
+total_imp4p_counts[!t_al_m] <- malignant_imp4p_counts[!t_al_m]
+
+normal_imp4p_counts <- total_imp4p_counts - malignant_imp4p_counts
+colnames(normal_imp4p_counts) <- sub("t$", "n", colnames(normal_imp4p_counts))
+```
+
+
+### Exploratory Analysis
+
+I'll start with a look at the distributions of log10-transformed expression values of total, malignant and normal transcription.
+
+```{r echo = FALSE, fig.cap = "Boxplot", message = FALSE, warning = FALSE}
+all_imp4p_counts <- cbind(total_imp4p_counts, malignant_imp4p_counts, normal_imp4p_counts)
+boxplot(log10(all_imp4p_counts+1), las = 3)
+```
+
+Malignant transcription thus seems to be the minor proportion of total transcription.
+
+```{r  echo = FALSE, fig.cap = "Hierarchical Clustering", message = FALSE, warning = FALSE}
+plot(hclust(dist(t(log10(all_imp4p_counts+1)))))
+```
+
+It is therefore not surprising that normal and total expression cluster together and malignant expression cluster separately. It is also evident that within transcript types, time points cluster together, indicating that there are expression differences.
+
+
+#### Malignant Transcription
+
+I'll start with expression differences between December and August for the malignant isoform alone.
+
+```{r echo = FALSE, message = FALSE, warning = FALSE}
+malignant_groups <- rep(c(1, 0), each = 4)
+names(malignant_groups) <- colnames(malignant_imp4p_counts)
+malignant_changes <- DSS.DE(malignant_imp4p_counts, malignant_groups)
+head(malignant_changes)
+```
+
+
+#### Normal Transcription
+
+Now let's do the same for normal transcription.
+
+```{r echo = FALSE, message = FALSE, warning = FALSE}
+normal_groups <- rep(c(1, 0), each = 4)
+names(normal_groups) <- colnames(normal_imp4p_counts)
+normal_changes <- DSS.DE(normal_imp4p_counts, normal_groups)
+head(normal_changes)
+```
+
+
+#### Malignant vs Normal Changes
+
+I'll first visually inspect how normal transcript chances relate to those of the malignant transcript.
+For this, the result tables need to be resorted.
+
+```{r}
+malignant_changes <- malignant_changes[order(malignant_changes$geneIndex),]
+normal_changes <- normal_changes[order(normal_changes$geneIndex),]
+```
+
+```{r echo = FALSE, fig.cap = "Log Fold Change Scatterplot", message = FALSE, warning = FALSE}
+plot(x= malignant_changes$lfc,
+     y = normal_changes$lfc,
+     pch = ifelse(malignant_changes$fdr<0.05, 19, 21),
+     col = ifelse(normal_changes$fdr<0.05, "red", "black"),
+     xlab = "Malignant Log Fold Change",
+     ylab = "Normal Log Fold Change")
+```
+
+Filled circles indicate significant changes in malignant transcription (open circles are non-significant), red color highlights significant changes in normal transcription (black is non-significant). Results depend on the imputation, bur for simplicity let's assume all malignant changes are independent of normal changes.
+The number of patients with changed malignant transcription is the following:
+
+```{r}
+table(malignant_changes$fdr<0.05)
+```
+
+
+## The Simple Statistics Solution
+
+Our dataset is made up of two groups (August and December) with malignant and a complementary gene expression measure provided as read counts. I'll therefore compare counts for each patient between time points with 2x2 contingency tables.
+
+
+### Summary of Technical Replicates
+
+RNA-seq library preparation involves the exponential amplification of cDNA using PCR. Thus, I'll use the geometric mean to summarize technical replicates.
+
+```{r}
+geometric_mean = function(x) {
+  non_missing <- na.omit(x)
+  gm <- if (length(non_missing)>0) {
+    if (any(non_missing!=0)) {
+      exp(mean(log(non_missing[non_missing>0])))
+    } else 0
+  } else NA
+  return(gm)
+}
+```
+
+The function explicitly ignores missing values and should therefore make more samples available for analysis. To illustrate this, let's first check the number of samples containing missing values.
+
+```{r}
+table(apply(count_data, 1, function(x) any(is.na(x))))
+```
+
+This is quite a lot!
+Here I'll summarize technical replicates.
+
+```{r}
+columns <- list(August_m=1:4, December_m=5:8, August_t=9:12, December_t=13:16)
+count_gm <- sapply(columns, function(x) apply(count_data[, x], 1, geometric_mean))
+rownames(count_gm) <- paste("patient", 1:nrow(count_gm), sep = "_")
+```
+
+Now let's check if the summary statistics make sense, i.e. that the total gene expression is at least as high as the expression of the malignant isoform.
+
+```{r}
+all(count_gm[, "August_t"]>=count_gm[, "August_m"], na.rm = TRUE) &
+  all(count_gm[, "December_t"]>=count_gm[, "December_m"], na.rm = TRUE)
+```
+
+That looks fine, so let's check how many of the summarized samples contain missing values.
+
+```{r}
+table(apply(count_gm, 1, function(x) any(is.na(x))))
+```
+
+The summary procedure rescued roughly 7,000 samples, but still the majority contains missing values. 
+
+
+### Prediction of Missing Values
+
+Before missing value imputation, I'll have a closer look at the data to choose an appropriate prediction strategy.
+
+```{r}
+cor(na.omit(count_gm))
+```
+
+This reaveals a strong correlation of malignant expression between timepoints and total expression between time points. Since Pearson correaltion was used on untransformed counts there is a linear relationship. For the two expression types, I'll calculate the late vs early ratio.
+
+```{r}
+malignant_ratio <- mean(count_gm[, 2] / count_gm[, 1], na.rm = TRUE)
+total_ratio <- mean(count_gm[, 4] / count_gm[, 3], na.rm = TRUE)
+```
+
+Let's see how many missing values I can predict with these ratios. 
+
+```{r}
+missing_values <- data.frame(is.na(count_gm))
+```
+
+These are the missing value combinations in the malignant expression values...
+
+```{r}
+ftable(August_m~December_m, data = missing_values)
+```
+
+... and the total expression.
+
+```{r}
+ftable(August_t~December_t, data = missing_values)
+```
+
+With the ratio approach, I will rescue almost all missing data and only a small proportion cannot be predicted. So let's go ahead:
+
+```{r}
+count_imp <- count_gm
+
+count_imp[missing_values$August_m, "August_m"] <- 
+  count_gm[missing_values$August_m, "December_m"] / malignant_ratio
+
+count_imp[missing_values$December_m, "December_m"] <- 
+  count_gm[missing_values$December_m, "August_m"] * malignant_ratio
+
+count_imp[missing_values$August_t, "August_t"] <- 
+  count_gm[missing_values$August_t, "December_t"] / total_ratio
+
+count_imp[missing_values$December_t, "December_t"] <- 
+  count_gm[missing_values$December_t, "August_t"] * total_ratio
+
+```
+
+The sanity check of the resulting values however points to a problem...
+
+```{r}
+all(count_imp[, "August_t"]>=count_imp[, "August_m"], na.rm = TRUE) &
+  all(count_imp[, "December_t"]>=count_imp[, "December_m"], na.rm = TRUE)
+```
+
+... which I quickly fix.
+
+```{r}
+index <- which(count_imp[, "December_t"]<count_imp[, "December_m"])
+count_imp[index, "December_t"] <- count_imp[index, "December_m"]
+```
+
+
+### Expression Analysis
+
+We aim at finding patients with expression changes in the malignant isoform that are independent of the expression of other isoforms. For the analysis I therefore calculate the normal (`n`) gene expression.
+
+```{r}
+simple_analysis <- data.frame(August_m = count_imp[, "August_m"],
+                              August_n = count_imp[, "August_t"] - count_imp[, "August_m"],
+                              December_m = count_imp[, "December_m"],
+                              December_n = count_imp[, "December_t"] - count_imp[, "December_m"],
+                              imputed = apply(missing_values, 1, any),
+                              row.names = rownames(count_imp))
+```
+
+With this I'll calculate the log10(odds ratio) between August and December as effect size.
+
+```{r}
+log_odds_ratio <- function(x) {
+  odds_ratio <- (x[1]*x[4]) / (x[2]*x[3])
+  return(log2(odds_ratio))
+}
+
+simple_analysis$log2_OR <- apply(simple_analysis[, 1:4], 1, log_odds_ratio)
+```
+
+Then I'll calculate p-values using chi-squared tests and estimate the false discovery rate twice, once for p-values including and once for those excluding the imputed samples.
+
+```{r message = FALSE, warning = FALSE}
+simple_analysis$p.value <- apply(simple_analysis[, 1:4], 1, 
+                                 function(x) ifelse(any(is.na(x)), NA, 
+                                                    chisq.test(matrix(x, ncol=2))$p.value))
+simple_analysis$fdr_w_imp <- p.adjust(simple_analysis$p.value)
+simple_analysis$fdr_wo_imp <- NA
+simple_analysis$fdr_wo_imp[!simple_analysis$imputed] <- p.adjust(simple_analysis$p.value[!simple_analysis$imputed])
+```
+
+The distribution of nominal p-values...
+
+```{r echo = FALSE, message = FALSE, warning = FALSE}
+ggplot(simple_analysis, aes(x=p.value)) +
+  geom_density(color = "darkblue", fill ="lightblue") +
+  ggtitle("All p-values")
+```
+
+... is bimodal with an inflation of small p-values and a high proportion of p-values in the 0.5-0.8 range, which is probably an artifact from data imputation. Therefore let's have a look at the distribution of p-values from non-imputed samples:
+
+```{r echo = FALSE, message = FALSE, warning = FALSE}
+ggplot(subset(simple_analysis, !imputed), aes(x=p.value)) +
+  geom_density(color = "darkblue", fill ="lightblue") +
+  ggtitle("Non-imputed p-values")
+```
+
+This confirms that the imputed samples cause the peak of p-values in the 0.5-0.8 range. Other imputation strategies might give better results.
+
+Now let's see how many tests resist the correction for multiple testing, firstly considering all examined samples...
+
+```{r}
+sig_w_imp <- simple_analysis$fdr_w_imp<0.05
+table(sig_w_imp)
+```
+
+... secondly only the non-imputed samples...
+
+```{r}
+sig_wo_imp <- simple_analysis$fdr_wo_imp<0.05
+table(sig_wo_imp)
+```
+
+... and the concordance of results:
+
+```{r}
+ftable(sig_w_imp~sig_wo_imp)
+```
+
+I.e. due to the increased multiple testing problem in the imputed analysis setting, no expression differences are detectable between time points in some borderline samples. But are there some among the imputed samples?
+
+```{r}
+table(subset(simple_analysis, imputed)$fdr_w_imp<0.05)
+```
+
+Yes indeed there are some! 
+
+Now let's proceed with the...
+
+
+## The Sophisticated Statistics Solution
+
+With this approach, I'll examine the proportions of maligant to total gene expression.
+
+```{r message=FALSE}
+library(stats4)
+library(MASS)
+```
+
+### Aggregation of Technical Replicates
+
+Technically replicated read counts per gene origin from the same sample and may - ignoring e.g. sequencing batch effects - be cumulated to result in higher information content.
+
+```{r}
+count_cumulated <- data.frame(August_m = apply(count_data[, 1:4], 1, sum, na.rm = TRUE),
+                              December_m = apply(count_data[, 5:8], 1, sum, na.rm = TRUE),
+                              August_t = apply(count_data[, 9:12], 1, sum, na.rm = TRUE),
+                              December_t = apply(count_data[, 13:16], 1, sum, na.rm = TRUE),
+                              row.names = paste("patient", 1:nrow(count_data), sep = "_"))
+```
+
+Later I might need the normal expression values, so I'll add these here.
+
+```{r}
+count_cumulated$August_n <- with(count_cumulated, August_t-August_m)
+count_cumulated$December_n <- with(count_cumulated, December_t-December_m)
+```
+
+For correct estimation of malignant proportions, it's important to have the same number of missing values in malignant and total read-out, therefore I'll check the balanced occurrence of missing values.
+
+```{r}
+na_balanced <- function(x) sum(is.na(x[1:4]))==sum(is.na(x[5:8]))
+count_cumulated$August_balanced <- apply(count_data[, c(1:4, 9:12)], 1, na_balanced)
+count_cumulated$December_balanced = apply(count_data[, c(5:8, 13:16)], 1, na_balanced)
+```
+
+Balanced missing values in technical replicates and non-missing cumulated expression values make samples accessible for analysis. Let's check malignant expression in August...
+
+```{r}
+ftable(is.na(August_m)~August_balanced, data=count_cumulated)
+```
+
+... total expression in August...
+
+```{r}
+ftable(is.na(August_t)~August_balanced, data=count_cumulated)
+```
+
+... malignant expression in December ...
+
+```{r}
+ftable(is.na(December_m)~December_balanced, data=count_cumulated)
+```
+
+... and total expression in December:
+
+```{r}
+ftable(is.na(December_t)~December_balanced, data=count_cumulated)
+
+```
+
+With this approach, I can analyze almost the entire dataset without imputation of missing values! In the following sections, I'll therefore only concentrate on the balanced samples.
+
+
+```{r}
+count_cumulated$analyze <- count_cumulated$August_balanced & count_cumulated$December_balanced
+table(count_cumulated$analyze)
+```
+
+
+### Estimation of Beta Distribution
+
+Proportions of malignant to total transcript expressions follow a beta distribution. To account for varying information content, I'll estimate the prior beta distributions for both time points and shrink proportions towards the prior based on information content.
+
+```{r}
+count_cumulated$August_prior <- NA
+tmp_m <- count_cumulated$August_m[count_cumulated$analyze]
+tmp_t <- count_cumulated$August_t[count_cumulated$analyze]
+count_cumulated$August_prior[count_cumulated$analyze] <- tmp_m/tmp_t
+count_cumulated$December_prior <- NA
+tmp_m <- count_cumulated$December_m[count_cumulated$analyze]
+tmp_t <- count_cumulated$December_t[count_cumulated$analyze]
+count_cumulated$December_prior[count_cumulated$analyze] <- tmp_m/tmp_t
+```
+
+I'll introduce a convenience function:
+
+```{r}
+find_beta_shape <- function(x, start = list(shape1=1, shape2=10)) {
+  x <- na.omit(x)
+  x <- x[x!=0 & x!=1]
+  fit <- MASS::fitdistr(x = x, densfun = dbeta, start = start)
+  return(fit$estimate)
+}
+```
+
+And with this, I find shape parameters for the priors for August...
+
+```{r message=FALSE, warning=FALSE}
+August_shape <- find_beta_shape(count_cumulated$August_prior)
+August_shape
+```
+
+... and December:
+
+```{r message=FALSE, warning=FALSE}
+December_shape <- find_beta_shape(count_cumulated$December_prior)
+December_shape
+```
+
+
+Given these shape parameters, I'll update prior malignant transcript proportions to obtain posterior means shrunken towards the overall mean depending on information content. Since shape parameters are small compared to the read counts, the empirical Bayesian shrinkage will have only a minor effect.
+
+```{r}
+count_cumulated$August_shape1 <- count_cumulated$August_m+August_shape[1]
+count_cumulated$August_shape2 <- count_cumulated$August_n+August_shape[2]
+count_cumulated$August_posterior <- with(count_cumulated, 
+                                         August_shape1/(August_shape1+August_shape2))
+count_cumulated$August_posterior[!count_cumulated$analyze] <- NA
+
+count_cumulated$December_shape1 <- count_cumulated$December_m+December_shape[1]
+count_cumulated$December_shape2 <- count_cumulated$December_n+December_shape[2]
+count_cumulated$December_posterior <- with(count_cumulated, 
+                                         December_shape1/(December_shape1+December_shape2))
+count_cumulated$December_posterior[!count_cumulated$analyze] <- NA
+```
+
+
+### Hypothesis Testing
+
+For both time points, I have now posterior malignant transcript proportions and shape parameters for beta distributions. With these I can comparegene expression between time points.
+
+
+#### Effect Size
+
+Expression analysis is performed on proportions; thus, the appropriate effect size is the relative risk, which I subject to log2 transformation for symmetry reasons.
+
+```{r}
+count_cumulated$log2RR <- with(count_cumulated, log2(December_posterior/August_posterior))
+count_cumulated$log2RR[!count_cumulated$analyze] <- NA
+```
+
+
+#### Statistical Significance
+
+To assess statistical significance, I calculate empirical p-values by comparing randomly generated data using the distribution parameters from the two time points. 
+First, I implement a helper function for more convenient calculations.
+
+```{r}
+empirical_pvalue <- function(v, size = 1e4) {
+  es <- v[1]
+  early_sim <- rbeta(size, v[2], v[3])
+  late_sim <- rbeta(size, v[4], v[5])
+  emp_p <- if (es>0) {
+    1-mean(late_sim>early_sim)
+  } else {
+    1-mean(early_sim>late_sim)
+  }
+  return(emp_p)
+}
+```
+
+Then I use this for calculation of empirical p-values. To keep this approach reproducible, I fix the random seed.
+
+```{r}
+rel_clms <- c("log2RR", "August_shape1", "August_shape2", "December_shape1", "December_shape2")
+count_cumulated$emp_pval <- NA
+set.seed(42) # ;-)
+count_cumulated$emp_pval[count_cumulated$analyze] <- apply(subset(count_cumulated, analyze)[, rel_clms], 1,
+                                                           empirical_pvalue)
+```
+
+Let's first have a look at the distribution of empirical p-values:
+
+```{r echo = FALSE, message = FALSE, warning = FALSE, fig.cap="Empirical P-Value Distribution"}
+ggplot(subset(count_cumulated, analyze), aes(x=emp_pval)) +
+  geom_density(color = "darkblue", fill ="lightblue") +
+  ggtitle("empirical p-values")
+```
+
+Then the obtained empirical p-values are adjusted for multiple testing.
+
+```{r}
+count_cumulated$fdr <- NA
+count_cumulated$fdr[count_cumulated$analyze] <- p.adjust(count_cumulated$emp_pval[count_cumulated$analyze])
+```
+
+How many FDRs are below 5% (which I define as my significance threshold)?
+
+```{r}
+table(count_cumulated$fdr<0.05)
+```
+
+### Result visualization
+
+I firstly visualize the effect size (here the log10(odds ratio)) and the corresponding p-value with a volcano plot.
+
+```{r echo = FALSE, fig.cap = "Volcano Plot", message = FALSE, warning = FALSE}
+ggplot(subset(count_cumulated, analyze), 
+       aes(x = log2RR, y = -log10(emp_pval), color = fdr<0.05)) + 
+  geom_point() +
+  geom_vline(xintercept = 0, linetype = "dashed")
+```
+
+
+## Result Comparison
+
