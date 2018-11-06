@@ -1,3 +1,5 @@
+My solution to the exercise below can be found [here](https://raw.githubusercontent.com/clajusch/exercise/master/solution.html).
+
 # exercise
 
 This exercise goes along with the job offer on: https://recruitingapp-2695.de.umantis.com/Vacancies/273/Description/1

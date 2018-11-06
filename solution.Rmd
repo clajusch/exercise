@@ -66,7 +66,7 @@ library(imp4p)
 
 Here, I'll use the `imp4p` package to predict missing values in the dataset.
 
-```{r echo = FALSE, message = FALSE, warning = FALSE}
+```{r message = FALSE, warning = FALSE}
 set.seed(42) # ;-)
 experimental_groups <- factor(rep(1:2, each=8))
 fake_biol_reps <- factor(rep(1:4, each=4))
@@ -563,17 +563,26 @@ How many FDRs are below 5% (which I define as my significance threshold)?
 table(count_cumulated$fdr<0.05)
 ```
 
-### Result visualization
-
-I firstly visualize the effect size (here the log10(odds ratio)) and the corresponding p-value with a volcano plot.
-
-```{r echo = FALSE, fig.cap = "Volcano Plot", message = FALSE, warning = FALSE}
-ggplot(subset(count_cumulated, analyze), 
-       aes(x = log2RR, y = -log10(emp_pval), color = fdr<0.05)) + 
-  geom_point() +
-  geom_vline(xintercept = 0, linetype = "dashed")
-```
 
 
 ## Result Comparison
 
+The three approaches yielded different numbers of patients with significant expression changes of the malignant transcript between August and December. I'm now interested in the concodance of results. For this is build a table indicating which approach detected a significant change in which patient.
+
+```{r}
+result_table <- data.frame(bioinformatics = malignant_changes$fdr<0.05,
+                           simple_stats = simple_analysis$fdr_wo_imp<0.05,
+                           sophisticated_stats = count_cumulated$fdr<0.05,
+                           row.names = rownames(count_cumulated))
+result_table$bioinformatics[is.na(result_table$bioinformatics)] <- FALSE
+result_table$simple_stats[is.na(result_table$simple_stats)] <- FALSE
+result_table$sophisticated_stats[is.na(result_table$sophisticated_stats)] <- FALSE
+```
+
+The overlap between approaches is shown in a Venn Diagram.
+
+```{r echo = FALSE, message = FALSE, warning = FALSE, fig.cap="Venn Diagram"}
+limma::vennDiagram(result_table)
+```
+
+There is a set of patients that are concordantly diagnosed with malignant expression changes by all three approaches. The bioinformatics approach, which detected the least changes, has also the lowest overlap with the other detection strategies in terms of absolute counts. Both statistics approaches show, despite different handling of missing values, a very high degree of overlap. The sophisticated statistics approach is by far the most powerful one and is thus the method of choice for this analysis setting.
