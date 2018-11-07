@@ -1,4 +1,4 @@
-My solution to the exercise below can be found [here](https://raw.githubusercontent.com/clajusch/exercise/master/solution.html).
+My solution to the exercise below can be found [here](solution.html).
 
 # exercise
 
