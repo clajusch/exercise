@@ -318,6 +318,10 @@ Hierarchical Clustering
 <div id="malignant-transcription" class="section level4">
 <h4>Malignant Transcription</h4>
 <p>I’ll start with expression differences between December and August for the malignant isoform alone.</p>
+<pre class="r"><code>malignant_groups &lt;- rep(c(1, 0), each = 4)
+names(malignant_groups) &lt;- colnames(malignant_imp4p_counts)
+malignant_changes &lt;- DSS.DE(malignant_imp4p_counts, malignant_groups)
+head(malignant_changes)</code></pre>
 <pre><code>##               geneIndex       muA       muB       lfc    difExpr     stats
 ## patient_16202     16202 116.84543 1724.4416 -2.687826 -1607.5961 -18.00412
 ## patient_15018     15018  99.59479 1315.7764 -2.576444 -1216.1816 -17.67809
@@ -336,6 +340,10 @@ Hierarchical Clustering
 <div id="normal-transcription" class="section level4">
 <h4>Normal Transcription</h4>
 <p>Now let’s do the same for normal transcription.</p>
+<pre class="r"><code>normal_groups &lt;- rep(c(1, 0), each = 4)
+names(normal_groups) &lt;- colnames(normal_imp4p_counts)
+normal_changes &lt;- DSS.DE(normal_imp4p_counts, normal_groups)
+head(normal_changes)</code></pre>
 <pre><code>##               geneIndex       muA      muB       lfc     difExpr     stats
 ## patient_15764     15764  355.3367     0.00  6.567619    355.3367  17.86991
 ## patient_16949     16949  346.1121     0.00  6.541354    346.1121  17.82313
@@ -462,7 +470,7 @@ count_imp[index, &quot;December_t&quot;] &lt;- count_imp[index, &quot;December_m
                               December_n = count_imp[, &quot;December_t&quot;] - count_imp[, &quot;December_m&quot;],
                               imputed = apply(missing_values, 1, any),
                               row.names = rownames(count_imp))</code></pre>
-<p>With this I’ll calculate the log10(odds ratio) between August and December as effect size.</p>
+<p>With this I’ll calculate the log2(odds ratio) between August and December as effect size.</p>
 <pre class="r"><code>log_odds_ratio &lt;- function(x) {
   odds_ratio &lt;- (x[1]*x[4]) / (x[2]*x[3])
   return(log2(odds_ratio))
@@ -602,7 +610,7 @@ count_cumulated$December_posterior[!count_cumulated$analyze] &lt;- NA</code></pr
 </div>
 <div id="hypothesis-testing" class="section level3">
 <h3>Hypothesis Testing</h3>
-<p>For both time points, I have now posterior malignant transcript proportions and shape parameters for beta distributions. With these I can comparegene expression between time points.</p>
+<p>For both time points, I have now posterior malignant transcript proportions and shape parameters for beta distributions. With these I can compare gene expression between time points.</p>
 <div id="effect-size" class="section level4">
 <h4>Effect Size</h4>
 <p>Expression analysis is performed on proportions; thus, the appropriate effect size is the relative risk, which I subject to log2 transformation for symmetry reasons.</p>
@@ -664,6 +672,9 @@ result_table$sophisticated_stats[is.na(result_table$sophisticated_stats)] &lt;- 
 Venn Diagram
 </p>
 </div>
+</div>
+<div id="conclusion" class="section level2">
+<h2>Conclusion</h2>
 <p>There is a set of patients that are concordantly diagnosed with malignant expression changes by all three approaches. The bioinformatics approach, which detected the least changes, has also the lowest overlap with the other detection strategies in terms of absolute counts. Both statistics approaches show, despite different handling of missing values, a very high degree of overlap. The sophisticated statistics approach is by far the most powerful one and is thus the method of choice for this analysis setting.</p>
 </div>
 

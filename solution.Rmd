@@ -67,7 +67,7 @@ library(imp4p)
 
 Here, I'll use the `imp4p` package to predict missing values in the dataset.
 
-```{r message = FALSE, warning = FALSE}
+```{r message = FALSE, warning = FALSE, error=FALSE}
 set.seed(42) # ;-)
 experimental_groups <- factor(rep(1:2, each=8))
 fake_biol_reps <- factor(rep(1:4, each=4))
@@ -121,7 +121,7 @@ It is therefore not surprising that normal and total expression cluster together
 
 I'll start with expression differences between December and August for the malignant isoform alone.
 
-```{r echo = FALSE, message = FALSE, warning = FALSE}
+```{r message = FALSE, warning = FALSE}
 malignant_groups <- rep(c(1, 0), each = 4)
 names(malignant_groups) <- colnames(malignant_imp4p_counts)
 malignant_changes <- DSS.DE(malignant_imp4p_counts, malignant_groups)
@@ -133,7 +133,7 @@ head(malignant_changes)
 
 Now let's do the same for normal transcription.
 
-```{r echo = FALSE, message = FALSE, warning = FALSE}
+```{r message = FALSE, warning = FALSE}
 normal_groups <- rep(c(1, 0), each = 4)
 names(normal_groups) <- colnames(normal_imp4p_counts)
 normal_changes <- DSS.DE(normal_imp4p_counts, normal_groups)
@@ -300,7 +300,7 @@ simple_analysis <- data.frame(August_m = count_imp[, "August_m"],
                               row.names = rownames(count_imp))
 ```
 
-With this I'll calculate the log10(odds ratio) between August and December as effect size.
+With this I'll calculate the log2(odds ratio) between August and December as effect size.
 
 ```{r}
 log_odds_ratio <- function(x) {
@@ -501,7 +501,7 @@ count_cumulated$December_posterior[!count_cumulated$analyze] <- NA
 
 ### Hypothesis Testing
 
-For both time points, I have now posterior malignant transcript proportions and shape parameters for beta distributions. With these I can comparegene expression between time points.
+For both time points, I have now posterior malignant transcript proportions and shape parameters for beta distributions. With these I can compare gene expression between time points.
 
 
 #### Effect Size
@@ -585,5 +585,8 @@ The overlap between approaches is shown in a Venn Diagram.
 ```{r echo = FALSE, message = FALSE, warning = FALSE, fig.cap="Venn Diagram"}
 limma::vennDiagram(result_table)
 ```
+
+
+## Conclusion
 
 There is a set of patients that are concordantly diagnosed with malignant expression changes by all three approaches. The bioinformatics approach, which detected the least changes, has also the lowest overlap with the other detection strategies in terms of absolute counts. Both statistics approaches show, despite different handling of missing values, a very high degree of overlap. The sophisticated statistics approach is by far the most powerful one and is thus the method of choice for this analysis setting.
